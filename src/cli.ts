@@ -2,6 +2,7 @@ import { Command, Option } from 'commander';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { readEnabledToolsFromFile } from './lib/enabled-tools-file.js';
 import { assertSignoffMarkersVisible } from './lib/message-signoff.js';
 import { assertUploadDirsAbsolute } from './lib/upload-dirs.js';
 import { getCombinedPresetPattern, listPresets, presetRequiresOrgMode } from './tool-categories.js';
@@ -67,6 +68,10 @@ program
     'Filter tools using regex pattern (e.g., "excel|contact" to enable Excel and Contact tools)'
   )
   .option(
+    '--enabled-tools-file <path>',
+    'Filter tools using a file with one regex per line (same semantics as --enabled-tools; blank lines and whole-line # comments ignored). Overrides --enabled-tools; overridden by --preset. Equivalent env var: ENABLED_TOOLS_FILE.'
+  )
+  .option(
     '--allowed-scopes <scopes>',
     'Limit exposed tools to Graph scopes covered by this whitespace-separated allowlist'
   )
@@ -91,6 +96,10 @@ program
   .option('--work-mode', 'Alias for --org-mode')
   .option('--force-work-scopes', 'Backwards compatibility alias for --org-mode (deprecated)')
   .option('--toon', '(experimental) Enable TOON output format for 30-60% token reduction')
+  .option(
+    '--eager-tools <names>',
+    'With --discovery, also expose these comma-separated exact Graph or utility tool names directly. All enabled tools remain discoverable. Env: MS365_MCP_EAGER_TOOLS.'
+  )
   .option('--discovery', 'Enable runtime tool discovery and loading (experimental feature)')
   .option(
     '--cloud <type>',
@@ -170,6 +179,7 @@ export interface CommandOptions {
    */
   attachmentHost?: string;
   enabledTools?: string;
+  enabledToolsFile?: string;
   allowedScopes?: string;
   userFields?: string;
   extraScopes?: string;
@@ -181,6 +191,7 @@ export interface CommandOptions {
   forceWorkScopes?: boolean;
   toon?: boolean;
   discovery?: boolean;
+  eagerTools?: string[];
   cloud?: string;
   enableDynamicRegistration?: boolean;
   dynamicRegistration?: boolean;
@@ -227,6 +238,29 @@ export function parseArgs(): CommandOptions {
     process.exit(0);
   }
 
+  // Tool filter layering (later wins): --enabled-tools → --enabled-tools-file →
+  // --preset → ENABLED_TOOLS → ENABLED_TOOLS_FILE.
+  if (typeof options.enabledToolsFile === 'string') {
+    try {
+      options.enabledTools = readEnabledToolsFromFile(options.enabledToolsFile);
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exit(1);
+    }
+  }
+  delete options.enabledToolsFile;
+
+  const eagerValue = options.eagerTools ?? (process.env.MS365_MCP_EAGER_TOOLS?.trim() || undefined);
+  if (eagerValue !== undefined) {
+    if (!options.discovery) throw new Error('--eager-tools requires --discovery');
+    const names = String(eagerValue)
+      .split(',')
+      .map((name) => name.trim());
+    if (names.some((name) => name === ''))
+      throw new Error('--eager-tools requires non-empty exact tool names');
+    options.eagerTools = [...new Set(names)];
+  }
+
   if (options.preset) {
     const presetNames = options.preset.split(',').map((p: string) => p.trim());
     try {
@@ -253,6 +287,15 @@ export function parseArgs(): CommandOptions {
 
   if (process.env.ENABLED_TOOLS) {
     options.enabledTools = process.env.ENABLED_TOOLS;
+  }
+
+  if (process.env.ENABLED_TOOLS_FILE) {
+    try {
+      options.enabledTools = readEnabledToolsFromFile(process.env.ENABLED_TOOLS_FILE);
+    } catch (error) {
+      console.error(`Error: ${(error as Error).message}`);
+      process.exit(1);
+    }
   }
 
   if (options.allowedScopes === undefined && process.env.MS365_MCP_ALLOWED_SCOPES !== undefined) {

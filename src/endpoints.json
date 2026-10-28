@@ -275,10 +275,24 @@
     "pathPattern": "/me/messages/{message-id}",
     "method": "delete",
     "toolName": "delete-mail-message",
-    "descriptionOverride": "Delete an Outlook email message by its message ID. This is a soft delete that moves the message to Deleted Items.",
+    "requestOverride": {
+      "method": "post",
+      "path": "/me/messages/{message-id}/move",
+      "body": { "destinationId": "deleteditems" }
+    },
+    "descriptionOverride": "Delete an Outlook email message by its message ID, the way Delete in Outlook does: the message moves to the Deleted Items folder, where the user can see it and restore it. Returns the moved message with its new id.",
     "presets": ["mail", "outlook", "personal"],
     "scopes": ["Mail.ReadWrite"],
-    "llmTip": "Soft delete — moves to Deleted Items. To permanently delete, delete again from Deleted Items."
+    "llmTip": "Moves to Deleted Items (a move, so the message gets a new id). Use permanently-delete-mail-message to skip Deleted Items."
+  },
+  {
+    "pathPattern": "/me/messages/{message-id}",
+    "method": "delete",
+    "toolName": "permanently-delete-mail-message",
+    "descriptionOverride": "Permanently delete an Outlook email message by its message ID, the way Shift+Delete in Outlook does: the message skips the Deleted Items folder and goes to Recoverable Items, where it is not shown in the mailbox and can only be recovered until the retention period ends. Use delete-mail-message for an ordinary delete.",
+    "presets": ["mail", "outlook", "personal"],
+    "scopes": ["Mail.ReadWrite"],
+    "llmTip": "Skips Deleted Items. For a delete the user can see and undo, use delete-mail-message."
   },
   {
     "pathPattern": "/me/messages/{message-id}/move",
@@ -611,6 +625,33 @@
     "presets": ["work"],
     "workScopes": ["Calendars.Read.Shared"],
     "supportsTimezone": true
+  },
+  {
+    "pathPattern": "/users/{user-id}/calendar/events",
+    "method": "post",
+    "toolName": "create-shared-calendar-event",
+    "descriptionOverride": "Create an event in another user's default calendar. The user-id is the calendar owner's ID or email address, and delegated write access to that calendar is required. Times use nested objects, not flat fields: start: {dateTime, timeZone}, end: {dateTime, timeZone}. Do NOT use startDateTime/startTimeZone. For recurring events use the calendar owner's own time zone name rather than UTC, since Graph resolves DST against the zone in start.timeZone.",
+    "presets": ["work"],
+    "workScopes": ["Calendars.ReadWrite.Shared"],
+    "supportsTimezone": true
+  },
+  {
+    "pathPattern": "/users/{user-id}/events/{event-id}",
+    "method": "patch",
+    "toolName": "update-shared-calendar-event",
+    "descriptionOverride": "Update an event in another user's default calendar. Requires the calendar owner's user-id and the event's eventId from list-shared-calendar-events or get-shared-calendar-view. Times use nested {dateTime, timeZone} objects.",
+    "presets": ["work"],
+    "workScopes": ["Calendars.ReadWrite.Shared"],
+    "supportsTimezone": true
+  },
+  {
+    "pathPattern": "/users/{user-id}/events/{event-id}",
+    "method": "delete",
+    "toolName": "delete-shared-calendar-event",
+    "descriptionOverride": "Delete an event from another user's default calendar. Requires the calendar owner's user-id and the event's eventId from list-shared-calendar-events or get-shared-calendar-view.",
+    "llmTip": "Deleting a seriesMaster deletes ALL occurrences of the recurring event. If the owner organizes the meeting, deleting it sends a cancellation to the attendees.",
+    "presets": ["work"],
+    "workScopes": ["Calendars.ReadWrite.Shared"]
   },
   {
     "pathPattern": "/me/calendars/{calendar-id}/events/{event-id}/instances",
@@ -1178,6 +1219,41 @@
     "scopes": ["Notes.Read"]
   },
   {
+    "pathPattern": "/me/onenote/pages/{onenotePage-id}/content",
+    "method": "patch",
+    "toolName": "update-onenote-page-content",
+    "presets": ["onenote", "personal"],
+    "scopes": ["Notes.ReadWrite"],
+    "requestBodySchema": {
+      "type": "array",
+      "description": "Array of patchContentCommand objects applied in order to the page's HTML.",
+      "items": {
+        "type": "object",
+        "required": ["target", "action"],
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "Element to change: a data-id, the generated id, or a known name like 'body' or 'title'."
+          },
+          "action": {
+            "type": "string",
+            "enum": ["append", "insert", "prepend", "replace", "delete"],
+            "description": "What to do at the target. 'delete' takes no content."
+          },
+          "position": {
+            "type": "string",
+            "enum": ["after", "before"],
+            "description": "For 'insert'/'append', whether content goes after (default) or before the target's content."
+          },
+          "content": {
+            "type": "string",
+            "description": "HTML to add. Required for all actions except 'delete'."
+          }
+        }
+      }
+    }
+  },
+  {
     "pathPattern": "/sites/{site-id}/onenote/notebooks",
     "method": "get",
     "toolName": "list-sharepoint-site-onenote-notebooks",
@@ -1331,7 +1407,15 @@
     "presets": ["personal", "tasks"],
     "scopes": ["Tasks.Read"],
     "queryParams": ["top", "skip", "filter", "skiptoken"],
-    "llmTip": "Lists all To Do task lists. Returns todoTaskList-id needed for all task operations. The default list is typically called 'Tasks'."
+    "llmTip": "If it returns only 'Flagged Emails', use list-todo-task-lists-delta instead."
+  },
+  {
+    "pathPattern": "/me/todo/lists/delta()",
+    "method": "get",
+    "toolName": "list-todo-task-lists-delta",
+    "presets": ["personal", "tasks"],
+    "scopes": ["Tasks.ReadWrite"],
+    "queryParams": ["select", "skiptoken"]
   },
   {
     "pathPattern": "/me/todo/lists/{todoTaskList-id}/tasks",
@@ -1446,6 +1530,30 @@
     "toolName": "get-planner-plan",
     "presets": ["tasks", "work"],
     "scopes": ["Tasks.Read"]
+  },
+  {
+    "pathPattern": "/planner/plans",
+    "method": "post",
+    "toolName": "create-planner-plan",
+    "presets": ["tasks", "work"],
+    "scopes": ["Tasks.ReadWrite"],
+    "llmTip": "Body: {\"container\": {\"url\": \"https://graph.microsoft.com/v1.0/groups/{group-id}\"}, \"title\": \"...\"}. For a team, the group id is the team id. The signed-in user must be a member of the group. The container cannot be changed later. Returns the new plan id; to show the plan in a channel, add a Planner tab with create-channel-tab."
+  },
+  {
+    "pathPattern": "/planner/plans/{plannerPlan-id}",
+    "method": "patch",
+    "toolName": "update-planner-plan",
+    "presets": ["tasks", "work"],
+    "scopes": ["Tasks.ReadWrite"],
+    "llmTip": "CRITICAL: Requires If-Match header with ETag from get-planner-plan (use includeHeaders=true)."
+  },
+  {
+    "pathPattern": "/groups/{group-id}/planner/plans",
+    "method": "get",
+    "toolName": "list-group-planner-plans",
+    "presets": ["tasks", "work"],
+    "scopes": ["Tasks.Read"],
+    "llmTip": "Lists the plans owned by a Microsoft 365 group. For a team, the group id is the team id."
   },
   {
     "pathPattern": "/planner/plans/{plannerPlan-id}/tasks",
@@ -1960,6 +2068,14 @@
     "workScopes": ["TeamsTab.Read.All"]
   },
   {
+    "pathPattern": "/teams/{team-id}/channels/{channel-id}/tabs",
+    "method": "post",
+    "toolName": "create-channel-tab",
+    "presets": ["teams", "work"],
+    "workScopes": ["TeamsTab.Create"],
+    "llmTip": "Body: {\"displayName\": \"...\", \"teamsApp@odata.bind\": \"https://graph.microsoft.com/v1.0/appCatalogs/teamsApps/{teamsAppId}\", \"configuration\": {\"entityId\": ..., \"contentUrl\": ..., \"websiteUrl\": ..., \"removeUrl\": ...}}. Built-in app ids: website com.microsoft.teamspace.tab.web, document library com.microsoft.teamspace.tab.files.sharepoint, Planner com.microsoft.teamspace.tab.planner (see https://learn.microsoft.com/graph/teams-configuring-builtin-tabs). Planner tab for a basic plan (create it first with create-planner-plan): entityId \"planner.v1.{new-guid}_p_{planId}\"; contentUrl \"https://tasks.teams.microsoft.com/teamsui/{tid}/Home/PlannerFrame?page=7&auth_pvr=OrgId&auth_upn={userPrincipalName}&groupId={groupId}&planRoute=/v1/plan/{planId}&subEntityId={subEntityId}&channelId={channelId}&entityId={entityId}&tid={tid}&userObjectId={userObjectId}&sessionId={sessionId}&theme={theme}&mkt={locale}&ringId={ringId}&PlannerRouteHint={tid}&tabVersion=20200228.1_s\"; removeUrl the same with page=13; websiteUrl \"https://planner.cloud.microsoft/webui/v1/plan/{planId}?tid={tenantId}\". Replace only {planId}, {new-guid} and {tenantId} with real values; every other {placeholder} must stay literal, Teams fills it in. A tasks.office.com URL or a missing placeholder renders an error inside the tab."
+  },
+  {
     "pathPattern": "/teams/{team-id}/channels/{channel-id}/messages/{chatMessage-id}/setReaction",
     "method": "post",
     "toolName": "set-channel-message-reaction",
@@ -2112,6 +2228,28 @@
     "presets": ["work"],
     "workScopes": [["Sites.Read.All"], ["Sites.Selected"]],
     "llmTip": "Add $expand=fields to include actual column values. Without it, only metadata is returned."
+  },
+  {
+    "pathPattern": "/sites/{site-id}/lists/{list-id}/items/delta()",
+    "method": "get",
+    "toolName": "list-sharepoint-site-list-items-delta",
+    "presets": ["work"],
+    "workScopes": [["Sites.Read.All"], ["Sites.Selected"]],
+    "queryParams": ["select", "expand", "top"]
+  },
+  {
+    "pathPattern": "/sites/{site-id}/lists/{list-id}/items/{listItem-id}/versions",
+    "method": "get",
+    "toolName": "list-sharepoint-site-list-item-versions",
+    "presets": ["work"],
+    "workScopes": [["Sites.Read.All"], ["Sites.Selected"]]
+  },
+  {
+    "pathPattern": "/sites/{site-id}/lists/{list-id}/items/{listItem-id}/versions/{listItemVersion-id}",
+    "method": "get",
+    "toolName": "get-sharepoint-site-list-item-version",
+    "presets": ["work"],
+    "workScopes": [["Sites.Read.All"], ["Sites.Selected"]]
   },
   {
     "pathPattern": "/sites/{site-id}/lists/{list-id}/items",
