@@ -76,7 +76,7 @@ describe('get-download-url with format=', () => {
 
     it('mints a single-use URL whose ticket fetches /content?format=pdf', async () => {
       const target =
-        '/drives/66791E00B5BA8ECE/items/66791E00B5BA8ECE!s1e84be4b93f14dd690e7aebb4d78b6cb/content?format=pdf';
+        '/drives/0123456789ABCDEF/items/0123456789ABCDEF!s0123456789abcdef0123456789abcdef/content?format=pdf';
       const result = await tool.execute({ target }, ctx);
       expect((result as { isError?: boolean }).isError).toBeFalsy();
       const url = new URL(parse(result).downloadUrl);
