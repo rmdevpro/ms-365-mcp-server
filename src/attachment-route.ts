@@ -33,6 +33,7 @@ import type GraphClient from './graph-client.js';
 import type AuthManager from './auth.js';
 import {
   type AttachmentTicketStore,
+  isPlainGraphDownloadPath,
   isPlainGraphPath,
   TICKET_PARAM,
 } from './lib/attachment-tickets.js';
@@ -178,7 +179,7 @@ export function createAttachmentHandler(deps: AttachmentRouteDeps): Handler {
     // point before a fetch runs under the ticket's token: a target that reaches it
     // malformed should fail closed rather than resolve to whatever the path concatenation
     // makes of it.
-    if (!isPlainGraphPath(ticket.target)) {
+    if (!isPlainGraphDownloadPath(ticket.target)) {
       logger.error('Attachment redemption refused: ticket target is not a plain Graph path');
       refuse(res);
       return;
