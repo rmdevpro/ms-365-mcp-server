@@ -22,6 +22,8 @@ import { getUploadDirs, openUploadFile, type UploadFile } from './lib/upload-dir
 import {
   buildAttachmentUrl,
   type DownloadProbe,
+  DOWNLOAD_FORMATS,
+  isPlainGraphDownloadPath,
   isPlainGraphPath,
   isUnalteredGraphPath,
   TicketStoreFullError,
@@ -1429,14 +1431,14 @@ async function mintDownloadUrl(
   // fragment or a dot segment gets past them and resolves elsewhere once the path is
   // concatenated onto the Graph origin. Refuse rather than mint a ticket that names one
   // resource and fetches another.
-  if (!isPlainGraphPath(target)) {
+  if (!isPlainGraphDownloadPath(target)) {
     return {
       content: [
         {
           type: 'text',
           text: JSON.stringify({
             error:
-              'target must be a plain relative Graph path: no fragment, no query, no "." or ".." segments, and no percent-encoded separators.',
+              'target must be a plain relative Graph path: no fragment, no query (except format= on a drive /content download), no "." or ".." segments, and no percent-encoded separators.',
           }),
         },
       ],
@@ -2198,7 +2200,9 @@ export const UTILITY_TOOLS: readonly UtilityTool[] = [
             'Relative Microsoft Graph path starting with "/". Either a driveItem content path or the item path itself, e.g. ' +
               '/drives/{drive-id}/items/{driveItem-id}/content, /me/drive/items/{driveItem-id}/content, ' +
               'or /sites/{site-id}/drive/items/{driveItem-id}. ' +
-              'A trailing /content is optional and is stripped automatically for drive items. Mail attachment $value paths and meeting recordings are accepted on a server running with --enable-attachment-urls.'
+              'A trailing /content is optional and is stripped automatically for drive items. ' +
+              'To download a file converted, add ?format=pdf or ?format=html to its /content path (e.g. a Word document as PDF; needs --enable-attachment-urls). ' +
+              'Mail attachment $value paths and meeting recordings are accepted on a server running with --enable-attachment-urls.'
           ),
       };
       if (ctx.multiAccount) {
@@ -2246,6 +2250,51 @@ export const UTILITY_TOOLS: readonly UtilityTool[] = [
       // Normalize: separate any query string and strip trailing slashes so the /content and
       // /$value suffix checks are robust to e.g. "/content/" or "/content?select=id".
       const queryIdx = target.indexOf('?');
+      // One query is accepted: ?format=pdf|html on a drive item's /content, which Graph answers
+      // with the file converted (a Word document as PDF, say). Graph's own pre-authenticated
+      // downloadUrl is always the original file, so a converted one needs a URL this server
+      // mints (--enable-attachment-urls); redemption fetches /content?format=... as the caller.
+      if (queryIdx >= 0 && /^\?format=/.test(target.slice(queryIdx))) {
+        const contentPath = target.slice(0, queryIdx);
+        const isDriveContent =
+          /^\/drives\/[^/]+\/items\/[^/]+\/content$/.test(contentPath) ||
+          /^\/(?:me|users\/[^/]+|groups\/[^/]+|sites\/[^/]+)\/drive\/items\/[^/]+\/content$/.test(
+            contentPath
+          ) ||
+          /^\/(?:groups\/[^/]+|sites\/[^/]+)\/drives\/[^/]+\/items\/[^/]+\/content$/.test(
+            contentPath
+          ) ||
+          /^\/(?:drives\/[^/]+|(?:me|users\/[^/]+|groups\/[^/]+|sites\/[^/]+)\/drive)\/root:\/.+:\/content$/.test(
+            contentPath
+          );
+        if (!isDriveContent || !isPlainGraphDownloadPath(target)) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  error: `format= is accepted only as ?format=${DOWNLOAD_FORMATS.join('|')} on a drive item /content path, e.g. /drives/{drive-id}/items/{driveItem-id}/content?format=pdf.`,
+                }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        const minted = await mintDownloadUrl(target, accountParam, authManager);
+        if (minted) return minted;
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                error:
+                  'A converted download needs a URL minted by this server, which runs without --enable-attachment-urls. Use download-bytes with the same target.',
+              }),
+            },
+          ],
+          isError: true,
+        };
+      }
       if (queryIdx >= 0) {
         return {
           content: [

@@ -89,6 +89,22 @@ export function isPlainGraphPath(target: string): boolean {
 }
 
 /**
+ * Graph converts a drive file on download when `/content` is requested with `?format=`
+ * (e.g. a Word document as PDF). The only query a download ticket may carry is exactly
+ * that, on a `/content` path; the path itself still has to pass isPlainGraphPath, and the
+ * query is matched whole, so nothing in it reaches the URL parser as something else.
+ */
+export const DOWNLOAD_FORMATS = ['pdf', 'html'] as const;
+const FORMAT_QUERY = new RegExp(`^\\?format=(?:${DOWNLOAD_FORMATS.join('|')})$`);
+
+export function isPlainGraphDownloadPath(target: string): boolean {
+  const q = target.indexOf('?');
+  if (q < 0) return isPlainGraphPath(target);
+  const path = target.slice(0, q);
+  return FORMAT_QUERY.test(target.slice(q)) && /\/content$/.test(path) && isPlainGraphPath(path);
+}
+
+/**
  * The same round trip for a path filled in from a tool's own template. Compared decoded,
  * because skipEncoding parameters reach the path raw and the parser percent-encodes a
  * space or a non-ASCII letter in one without sending the request anywhere else.
